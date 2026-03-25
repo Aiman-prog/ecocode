@@ -15,14 +15,14 @@ def manage_input(prompt):
         }
     
     ##dummy logic to be replaced by task 2
-    potential_paths = re.findall(r'(/[^\s,]+|[^\s,]+\.[a-zA-Z0-9]+)', prompt)
+    potential_paths = re.findall(r'(\/[^\n,]+?\.[a-zA-Z0-9]+)', prompt)
     files = [p.strip(',.?!') for p in potential_paths if os.path.exists(p.strip(',.?!'))]
     file_tokens = 0
     if files:
         with open(files[0], 'r') as f:
             file_tokens = len(f.read().split()) * 4
     else:
-        files = "None"
+        files = []
 
     if len(prompt) < 50:
         complexity = "Simple"
@@ -61,7 +61,7 @@ def main():
     if result['context_files']:
         print(f"CONTEXT AUDIT:    Found file(s): {result['context_files']}")
     else:
-        print(f"CONTEXT AUDIT: NO FILE MENTIONED")
+        print(f"CONTEXT AUDIT:    NO FILE FOUND")
     print("-" * 40)
     print(f"COMPLEXITY:       {result['complexity']}")
     print(f"RECOMMENDED:      {result['model']}")
