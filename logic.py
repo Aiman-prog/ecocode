@@ -48,7 +48,7 @@ class InputData:
     problem_statement: str
     repo: str
     base_commit: str
-    resolved_file_path: Optional[str] = None
+    resolved_path: Optional[str] = None
     mentioned_file_hint: Optional[str] = None
     file_content: str = ""
 
@@ -150,13 +150,13 @@ def prepare_input_data(row: dict) -> Optional[InputData]:
         return None
     
     repo_dir = repo_checker(input_data.repo, input_data.base_commit)
-    resolved_file_path = resolved_file_path(repo_dir)
+    resolved_path = resolved_file_path(repo_dir)
 
-    if resolved_file_path is None:
+    if resolved_path is None:
         return None
     
-    input_data.resolved_file_path = str(resolved_file_path)
-    input_data.file_content = load_full_file(resolved_file_path)
+    input_data.resolved_path = str(resolved_path)
+    input_data.file_content = load_full_file(resolved_path)
     return input_data
 
 def complexity_assessment(input_data: InputData) -> str:
@@ -245,19 +245,19 @@ def manage_input(prompt):
     files = [p.strip(',.?!') for p in potential_paths if os.path.exists(p.strip(',.?!'))]
 
     file_content = ""
-    resolved_file_path = None
+    resolved_path = None
 
     if files:
-        resolved_file_path = files[0]
-        file_content = Path(resolved_file_path).read_text(encoding="utf-8", errors="ignore")
+        resolved_path = files[0]
+        file_content = Path(resolved_path).read_text(encoding="utf-8", errors="ignore")
 
     input_data = InputData(
         instance_id="cli",
         repo = "local",
         base_commit="local",
         problem_statement=prompt,
-        mentioned_file_hint=resolved_file_path,
-        resolved_file_path=resolved_file_path,
+        mentioned_file_hint=resolved_path,
+        resolved_file_path=resolved_path,
         file_content=file_content
     )   
     output = route_input(input_data)
@@ -279,7 +279,7 @@ def manage_input(prompt):
 def evaluate(n: int = 100) -> None:
     kept = 0
 
-    for row in ds:
+    for row in ds["test"]:
         if kept >= n:
             break
 
