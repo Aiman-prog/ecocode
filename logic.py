@@ -18,15 +18,15 @@ MEDIUM_MODEL = "medium"
 LARGE_MODEL = "large"
 
 MAPPING_TO_MODEL = {
-    SMALL_MODEL: "tbd_small",
-    MEDIUM_MODEL: "tbd_medium",
-    LARGE_MODEL: "tbd_large",
+    SMALL_MODEL: "LLaMA-3 8B / Gemini Flash Lite",
+    MEDIUM_MODEL: "LLaMA-3 70B / DeepSeek Chat",
+    LARGE_MODEL: "GPT-4o / Claude Opus",
 }
 
 MODEL_ENERGY_COST = {
-    SMALL_MODEL: 0.1,
-    MEDIUM_MODEL: 0.5,
-    LARGE_MODEL: 1.0,
+    SMALL_MODEL: 0.000015,
+    MEDIUM_MODEL: 0.00011,
+    LARGE_MODEL: 0.00090,
 }
 
 THRESHOLDS = {
@@ -150,7 +150,7 @@ def prepare_input_data(row: dict) -> Optional[InputData]:
         return None
     
     repo_dir = repo_checker(input_data.repo, input_data.base_commit)
-    resolved_path = resolved_file_path(repo_dir)
+    resolved_path = resolved_file_path(repo_dir, input_data.mentioned_file_hint)
 
     if resolved_path is None:
         return None
@@ -180,9 +180,10 @@ def model_selection(input_data: InputData) -> str:
         return LARGE_MODEL
     
     
-def energy_savings_estimation(model: str) -> Tuple[float, float]:
-    baseline_energy = MODEL_ENERGY_COST[LARGE_MODEL]
-    selected_energy = MODEL_ENERGY_COST[model]
+def energy_savings_estimation(input_data: InputData, model: str) -> Tuple[float, float]:
+    tokens = input_data.total_token_count
+    baseline_energy = tokens * MODEL_ENERGY_COST[LARGE_MODEL]
+    selected_energy = tokens * MODEL_ENERGY_COST[model]
 
     estimated_saved_energy = max(0.0, baseline_energy - selected_energy)
     savings_percentage = (estimated_saved_energy / baseline_energy) * 100
@@ -209,7 +210,7 @@ def reasoning_explanation(input_data: InputData, model: str) -> str:
 def route_input(input_data: InputData) -> OutputData:
     model = model_selection(input_data)
     model_name = MAPPING_TO_MODEL[model]
-    estimated_saved_energy, savings_percentage = energy_savings_estimation(model)
+    estimated_saved_energy, savings_percentage = energy_savings_estimation(input_data, model)
     reasoning = reasoning_explanation(input_data, model)
     
     return OutputData(complexity=complexity_assessment(input_data), 
@@ -257,12 +258,12 @@ def manage_input(prompt):
         base_commit="local",
         problem_statement=prompt,
         mentioned_file_hint=resolved_path,
-        resolved_file_path=resolved_path,
+        resolved_path=resolved_path,
         file_content=file_content
     )   
     output = route_input(input_data)
-    baseline_energy = MODEL_ENERGY_COST[LARGE_MODEL]
-    energy = MODEL_ENERGY_COST[output.model]
+    baseline_energy =  input_data.total_token_count * MODEL_ENERGY_COST[LARGE_MODEL]
+    energy = input_data.total_token_count * MODEL_ENERGY_COST[output.model]
 
 
     return {
@@ -271,7 +272,7 @@ def manage_input(prompt):
             "energy": energy,
             "baseline": baseline_energy,
             "savings": output.savings_percentage,
-            "tokens": output.estimated_saved_energy,
+            "tokens": input_data.total_token_count,
             "context_files": files,
             "reasoning": output.reasoning,
         }
