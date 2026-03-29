@@ -1,10 +1,18 @@
 from __future__ import annotations
 from dataclasses import dataclass, asdict, field
 from typing import Any, Dict, List, Optional, Tuple
+from xml.parsers.expat import model
+import argparse
+import re
+import subprocess
+import os
 
+from pathlib import Path
 from datasets import load_dataset
 
-ds = load_dataset("SWE-bench/SWE-bench_Verified")
+from correct import run_git
+
+ds = load_dataset("princeton-nlp/SWE-bench_Lite")
 
 
 SMALL_MODEL = "small"
@@ -23,95 +31,144 @@ MODEL_ENERGY_COST = {
     LARGE_MODEL: 1.0,
 }
 
+THRESHOLDS = {
+    "easy": 400.0,
+    "medium": 2000.0,
+}
+
+REPO_DIR = Path("repos")
+REPO_DIR.mkdir(parents=True, exist_ok=True)
+
+FILE_PATTERN = re.compile(
+    r"\b(?:[\w\-/]+/)?[\w\-]+\.(?:py|pyi|js|ts|java|cpp|c|h|go|rb|php|rs)\b"
+)
+
+
 @dataclass
 class InputData:
+    instance_id: str
     problem_statement: str
-    hints_text: str = ""
-    file_paths: List[str] = field(default_factory=list)
-    swe_bench_difficulty: Optional[str] = None
+    repo: str
+    base_commit: str
+    resolved_file_path: Optional[str] = None
+    mentioned_file_hint: Optional[str] = None
+    file_content: str = ""
 
     @property
-    def num_files(self) -> int:
-        return max(1, len(self.file_paths))
+    def prompt_token_count(self) -> int:
+        return len(self.problem_statement.split())
     
     @property
-    def includes_hints(self) -> bool:
-        return bool(self.hints_text and self.hints_text.strip())
+    def file_token_count(self) -> int:
+        return len(self.file_content.split())
     
     @property
-    def combined(self) -> str:
-        return f"{self.problem_statement}\n{self.hints_text}".strip()
-    
-    @property
-    def token_count(self) -> int:
-        return len(self.combined.split())
+    def total_token_count(self) -> int:
+        return self.prompt_token_count + self.file_token_count
+
     
 @dataclass
 class OutputData:
-    intent: str
     complexity: str
     model: str
     model_name: str
     estimated_saved_energy: float
     reasoning: str
     savings_percentage: float
-    swe_bench_difficulty: Optional[str] = None
+
+
+def run_git(args: List[str], cwd: Optional[Path] = None) -> None:
+    subprocess.run(["git"] + args, cwd=str(cwd) if cwd else None, check=True, 
+                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    
+def repo_checker(repo_name: str, base_commit: str) -> Path:
+    owner, name = repo_name.split("/")
+    repo_path = REPO_DIR / f"{owner}_{name}"   
+    remote_url = f"https://github.com/{owner}/{name}.git"
+
+    if not repo_path.exists():
+        run_git(["clone", remote_url, str(repo_path)])
+
+    run_git(["fetch", "--all", "--tags"], cwd=repo_path)
+    run_git(["checkout", "-f", base_commit], cwd=repo_path)
+    return repo_path
+
+def extract_file(problem_statement: str) -> List[str]:
+    matches = [m.group(0) for m in FILE_PATTERN.finditer(problem_statement or "")]
+    seen = set()
+    ordered_unique = []
+    for match in matches:
+        if match not in seen:
+            seen.add(match)
+            ordered_unique.append(match)
+    return ordered_unique
+
+def resolved_file_path(repo_dir: Path, file_hint: str) -> Optional[Path]:
+    normalized_hint = file_hint.replace("\\", "/").strip().lower()
+    repo_files = [
+        p for p in repo_dir.rglob("*")
+        if p.is_file() and ".git" not in p.parts
+    ]
+    for p in repo_files:
+        rel = str(p.relative_to(repo_dir)).replace("\\", "/").lower()
+        if rel == normalized_hint:
+            return p
+    for p in repo_files:
+        rel = str(p.relative_to(repo_dir)).replace("\\", "/").lower()
+        if rel.endswith(normalized_hint):
+            return p
+    hint_basename = Path(normalized_hint).name
+    basename_matches = [p for p in repo_files if p.name.lower() == hint_basename]
+
+    if len(basename_matches) == 1:
+        return basename_matches[0]
+
+    if basename_matches:
+        basename_matches.sort(key=lambda p: len(str(p.relative_to(repo_dir))))
+        return basename_matches[0]
+
+    return None
+
+def load_full_file(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="ignore")
 
 def converter(row: dict) -> InputData:
+    problem_statement = row.get("problem_statement", "")
+    mentioned_files = extract_file(problem_statement)
+    if not mentioned_files:
+        return None
+
     return InputData(
-        problem_statement=row.get("problem_statement", ""),
-        hints_text= row.get("hints_text", "") or "",
-        file_paths=[],
-        swe_bench_difficulty=row.get("difficulty"),
+        instance_id = row["instance_id"],
+        problem_statement=problem_statement,
+        repo=row["repo"],
+        base_commit=row["base_commit"],
+        mentioned_file_hint=mentioned_files[0],
     )
 
-def intent_detection(input_data: InputData) -> str:
-    problem_statement = input_data.problem_statement.lower()
+def prepare_input_data(row: dict) -> Optional[InputData]:
+    input_data = converter(row)
+    if input_data is None:
+        return None
+    
+    repo_dir = repo_checker(input_data.repo, input_data.base_commit)
+    resolved_file_path = resolved_file_path(repo_dir)
 
-    keywords = {
-        # hard
-        "code_generation": ["write code", "generate code", "create code", "implement"],
-        # medium
-        "code_explanation": ["explain code", "describe code", "code explanation", "code walkthrough"],
-        # medium
-        "bug_fixing": ["fix bug", "debug code", "troubleshoot", "resolve issue", "indexerror", "valueerror", "attributeerror", "does not", "incorrect", "wrong", "fails", "failing", "unexpected", "broken", "not working", "cannot", "crash", "exception"],
-        # medium
-        "general_query": ["what is", "how to", "why does", "explain", "describe", "tell me about"],
-        # easy
-        "simple_edit": ["change", "modify", "update", "refactor", "format", "typo"],
-        # medium
-        "exploratory_analysis": ["analyze", "explore", "data analysis", "visualize data"],
-        # hard
-        "feature_request": ["add feature", "new feature", "feature request", "enhancement", "enable"],
-    }
-
-    for intent, key_phrases in keywords.items():
-        if any(phrase in problem_statement for phrase in key_phrases):
-            return intent
-    return "unknown_intent"
+    if resolved_file_path is None:
+        return None
+    
+    input_data.resolved_file_path = str(resolved_file_path)
+    input_data.file_content = load_full_file(resolved_file_path)
+    return input_data
 
 def complexity_assessment(input_data: InputData) -> str:
-    token_count = input_data.token_count
-    num_files = input_data.num_files
-    intent = intent_detection(input_data)
-    includes_hints = input_data.includes_hints
-
-    if token_count < 250 and num_files <= 1 and intent in ["simple_edit"]:
+    total_len = input_data.total_token_count
+    if total_len < THRESHOLDS["easy"]:
         complexity = "easy"
-    elif token_count < 1200 and num_files <= 3 and intent in ["code_explanation", "bug_fixing", "general_query", "exploratory_analysis"]:
-        complexity = "medium"
-    # if there is unknown intent classify it as medium 
-    elif token_count < 800 and num_files <=2 and intent in ["unknown_intent"]:
+    elif total_len < THRESHOLDS["medium"]:
         complexity = "medium"
     else:
         complexity = "hard"
-    
-    # also including hints in the calculation
-    # if we have hints, we can change hard to medium
-    if complexity == "hard" and includes_hints and token_count < 1500 and num_files <= 2:
-        complexity = "medium"
-
-  
 
     return complexity
     
@@ -125,96 +182,153 @@ def model_selection(input_data: InputData) -> str:
         return LARGE_MODEL
     
     
-def energy_savings_estimation(input_data: InputData, model: str) -> Tuple[float, float]:
-    complexity = complexity_assessment(input_data)
+def energy_savings_estimation(model: str) -> Tuple[float, float]:
     baseline_energy = MODEL_ENERGY_COST[LARGE_MODEL]
-    if complexity == "easy":
-        selected_energy = MODEL_ENERGY_COST[model]
-    elif complexity == "medium":
-        selected_energy = MODEL_ENERGY_COST[model]
-    else:
-        selected_energy = MODEL_ENERGY_COST[model]
+    selected_energy = MODEL_ENERGY_COST[model]
 
     estimated_saved_energy = max(0.0, baseline_energy - selected_energy)
-    savings_percentage = (estimated_saved_energy / baseline_energy) * 100 if baseline_energy > 0 else 0
+    savings_percentage = (estimated_saved_energy / baseline_energy) * 100
 
     return estimated_saved_energy, savings_percentage
 
 def reasoning_explanation(input_data: InputData, model: str) -> str:
     complexity = complexity_assessment(input_data)
-    intent = intent_detection(input_data)
-    token_num = input_data.token_count
-    number_of_files = input_data.num_files
     suggested_model_energy = MODEL_ENERGY_COST[model]
     large_model_energy = MODEL_ENERGY_COST[LARGE_MODEL]
     savings = large_model_energy - suggested_model_energy
     savings_percentage = (MODEL_ENERGY_COST[LARGE_MODEL] - MODEL_ENERGY_COST[model]) / MODEL_ENERGY_COST[LARGE_MODEL] * 100
-    includes_hints = input_data.includes_hints
 
-    reasoning = f"The input prompt contains {token_num} tokens and references {number_of_files} file(s)."
-    reasoning += f" The intent detected is {intent} which makes it classified as {complexity} complexity."
+
+    reasoning = f"The input prompt contains {input_data.total_token_count:.1f} tokens."
+    reasoning += f" it classified as {complexity} complexity."
     reasoning += f" Considering the complexity, the suggested model is {model} which has an energy cost of {suggested_model_energy} units."
     reasoning += f" By choosing this model, compared to the baseline of {LARGE_MODEL} with an energy cost of {large_model_energy} units, the estimated savings is {savings} units; therefore, approximately {savings_percentage:.2f}% savings."
 
-    if includes_hints:
-        reasoning += f" The additional hints are considered in the assessment."
 
     return reasoning
 
-def evaluating_swebench_difficulty(input_data: InputData) -> Optional[str]:
-    if not input_data.swe_bench_difficulty:
-        return "unknown"
-    difficulty = input_data.swe_bench_difficulty.strip().lower()
-    if difficulty == "<15 min fix":
-        return "easy"
-    if difficulty == "15 min - 1 hour":
-        return "medium"
-    if difficulty == "1-4 hours":
-        return "hard"
-        
-    return None
 
-
-
-def main(input_data: InputData) -> OutputData:
-    intent = intent_detection(input_data)
-    complexity = complexity_assessment(input_data)
+def route_input(input_data: InputData) -> OutputData:
     model = model_selection(input_data)
     model_name = MAPPING_TO_MODEL[model]
-    estimated_saved_energy, savings_percentage = energy_savings_estimation(input_data, model)
+    estimated_saved_energy, savings_percentage = energy_savings_estimation(model)
     reasoning = reasoning_explanation(input_data, model)
-    swe_bench_difficulty = evaluating_swebench_difficulty(input_data)
     
-    return OutputData(intent=intent, complexity=complexity, model=model, model_name=model_name, estimated_saved_energy=estimated_saved_energy, reasoning=reasoning, savings_percentage=savings_percentage, swe_bench_difficulty=swe_bench_difficulty)
+    return OutputData(complexity=complexity_assessment(input_data), 
+                      model=model, 
+                      model_name=model_name, 
+                      estimated_saved_energy=estimated_saved_energy, 
+                      reasoning=reasoning, 
+                      savings_percentage=savings_percentage)
 
 
-def checking_alignment(n: int) -> None:
-    matches = 0
-    total = 0
+def main_swebench(row: dict) -> Optional[OutputData]:
+    input_data = prepare_input_data(row)
+    if input_data is None:
+        return None
+    return route_input(input_data)
 
-    for i in range(min(n, len(ds["test"]))):
-        row = ds["test"][i]
-        input_data = converter(row)
-        output = main(input_data)
 
-        if output.swe_bench_difficulty in {"easy", "medium", "hard"}:
-            total += 1
-            if output.complexity == output.swe_bench_difficulty:
-                matches += 1
-
-            else:
-                print("\nMismatch")
-                print("Problem:", input_data.problem_statement[:500])
-                print("Predicted:", output.complexity)
-                print("Benchmark:", output.swe_bench_difficulty)
-                print("Intent:", output.intent)
-                print("Tokens:", input_data.token_count)
-                print("Includes hints:", input_data.includes_hints)
+def manage_input(prompt):
+    ##testing case
+    if "--test" in prompt:
+        return {
+            "complexity": "Simple",
+            "model": "Small",
+            "energy": 0.0012,
+            "baseline": 0.0058,
+            "savings": 79,
+            "tokens": 320,
+            "context_files": [],
+            "reasoning": "some reasoning here",
+        }
     
-    print(f"Matches: {matches}/{total}")
-    if total > 0:
-        print(f"Alignment: {matches / total:.2%}")
+    potential_paths = re.findall(r'(\/[^\n,]+?\.[a-zA-Z0-9]+)', prompt)
+    files = [p.strip(',.?!') for p in potential_paths if os.path.exists(p.strip(',.?!'))]
+
+    file_content = ""
+    resolved_file_path = None
+
+    if files:
+        resolved_file_path = files[0]
+        file_content = Path(resolved_file_path).read_text(encoding="utf-8", errors="ignore")
+
+    input_data = InputData(
+        instance_id="cli",
+        repo = "local",
+        base_commit="local",
+        problem_statement=prompt,
+        mentioned_file_hint=resolved_file_path,
+        resolved_file_path=resolved_file_path,
+        file_content=file_content
+    )   
+    output = route_input(input_data)
+    baseline_energy = MODEL_ENERGY_COST[LARGE_MODEL]
+    energy = MODEL_ENERGY_COST[output.model]
+
+
+    return {
+            "complexity": output.complexity,
+            "model": output.model_name,
+            "energy": energy,
+            "baseline": baseline_energy,
+            "savings": output.savings_percentage,
+            "tokens": output.estimated_saved_energy,
+            "context_files": files,
+            "reasoning": output.reasoning,
+        }
+
+def evaluate(n: int = 100) -> None:
+    kept = 0
+
+    for row in ds:
+        if kept >= n:
+            break
+
+        output = main_swebench(row)
+        if output is None:
+            continue
+
+        kept += 1
+        print(f"Example {kept}:")
+        print("Instance ID:", row["instance_id"])
+        print("Repo:", row["repo"])
+        print("Problem Statement:", row.get("problem_statement", "")[:500])
+        print("Model:", output.model)
+        print("Complexity:", output.complexity)
+        print("Estimated Saved Energy:", output.estimated_saved_energy)
+        print("Savings Percentage:", f"{output.savings_percentage:.2f}%")
+        print("Reasoning:", output.reasoning)
+        print("-" * 80)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="EcoRoute CLI")
+    parser.add_argument("prompt", nargs="?", type=str)
+
+    args = parser.parse_args()
+
+    result = manage_input(args.prompt)
+
+    print("\n" + "="*40)
+    print("    ECOCODE SUSTAINABILITY DASHBOARD")
+    print("="*40)
+    print(f"TASK DETECTED:    {args.prompt[:30]}...")
+    if result['context_files']:
+        print(f"CONTEXT AUDIT:    Found file(s): {result['context_files']}")
+    else:
+        print(f"CONTEXT AUDIT:    NO FILE FOUND")
+    print("-" * 40)
+    print(f"COMPLEXITY:       {result['complexity']}")
+    print(f"RECOMMENDED:      {result['model']}")
+    print("-" * 40)
+    print(f"EST. ENERGY:      {result['energy']:.6f}".rstrip('0').rstrip('.') + " kWh")
+    print(f"SAVINGS:          {result['savings']:.2f}% ")
+    print(f"EST. TOKENS:      {result['tokens']}")
+    print(f"REASONING:        {result['reasoning']}")
+    print("="*40 + "\n")
+
 
 
 if __name__ == "__main__":
-    checking_alignment(500)
+    main()
