@@ -10,8 +10,6 @@ import os
 from pathlib import Path
 from datasets import load_dataset
 
-from correct import run_git
-
 ds = load_dataset("princeton-nlp/SWE-bench_Lite")
 
 
