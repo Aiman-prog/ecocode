@@ -30,8 +30,8 @@ MODEL_ENERGY_COST = {
 }
 
 THRESHOLDS = {
-    "easy": 400.0,
-    "medium": 2000.0,
+    "easy": 200.0,
+    "medium": 800.0,
 }
 
 REPO_DIR = Path("repos")
@@ -62,7 +62,7 @@ class InputData:
     
     @property
     def total_token_count(self) -> int:
-        return self.prompt_token_count + self.file_token_count
+        return self.prompt_token_count + 0.3 * self.file_token_count
 
     
 @dataclass
