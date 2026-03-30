@@ -10,8 +10,6 @@ import os
 from pathlib import Path
 from datasets import load_dataset
 
-from correct import run_git
-
 ds = load_dataset("princeton-nlp/SWE-bench_Lite")
 
 
@@ -20,20 +18,20 @@ MEDIUM_MODEL = "medium"
 LARGE_MODEL = "large"
 
 MAPPING_TO_MODEL = {
-    SMALL_MODEL: "tbd_small",
-    MEDIUM_MODEL: "tbd_medium",
-    LARGE_MODEL: "tbd_large",
+    SMALL_MODEL: "LLaMA-3 8B / Gemini Flash Lite",
+    MEDIUM_MODEL: "LLaMA-3 70B / DeepSeek Chat",
+    LARGE_MODEL: "GPT-4o / Claude Opus",
 }
 
 MODEL_ENERGY_COST = {
-    SMALL_MODEL: 0.1,
-    MEDIUM_MODEL: 0.5,
-    LARGE_MODEL: 1.0,
+    SMALL_MODEL: 0.000015,
+    MEDIUM_MODEL: 0.00011,
+    LARGE_MODEL: 0.00090,
 }
 
 THRESHOLDS = {
-    "easy": 400.0,
-    "medium": 2000.0,
+    "easy": 200.0,
+    "medium": 800.0,
 }
 
 REPO_DIR = Path("repos")
@@ -50,7 +48,7 @@ class InputData:
     problem_statement: str
     repo: str
     base_commit: str
-    resolved_file_path: Optional[str] = None
+    resolved_path: Optional[str] = None
     mentioned_file_hint: Optional[str] = None
     file_content: str = ""
 
@@ -64,7 +62,7 @@ class InputData:
     
     @property
     def total_token_count(self) -> int:
-        return self.prompt_token_count + self.file_token_count
+        return self.prompt_token_count + 0.3 * self.file_token_count
 
     
 @dataclass
@@ -152,13 +150,13 @@ def prepare_input_data(row: dict) -> Optional[InputData]:
         return None
     
     repo_dir = repo_checker(input_data.repo, input_data.base_commit)
-    resolved_file_path = resolved_file_path(repo_dir)
+    resolved_path = resolved_file_path(repo_dir, input_data.mentioned_file_hint)
 
-    if resolved_file_path is None:
+    if resolved_path is None:
         return None
     
-    input_data.resolved_file_path = str(resolved_file_path)
-    input_data.file_content = load_full_file(resolved_file_path)
+    input_data.resolved_path = str(resolved_path)
+    input_data.file_content = load_full_file(resolved_path)
     return input_data
 
 def complexity_assessment(input_data: InputData) -> str:
@@ -182,9 +180,10 @@ def model_selection(input_data: InputData) -> str:
         return LARGE_MODEL
     
     
-def energy_savings_estimation(model: str) -> Tuple[float, float]:
-    baseline_energy = MODEL_ENERGY_COST[LARGE_MODEL]
-    selected_energy = MODEL_ENERGY_COST[model]
+def energy_savings_estimation(input_data: InputData, model: str) -> Tuple[float, float]:
+    tokens = input_data.total_token_count
+    baseline_energy = tokens * MODEL_ENERGY_COST[LARGE_MODEL]
+    selected_energy = tokens * MODEL_ENERGY_COST[model]
 
     estimated_saved_energy = max(0.0, baseline_energy - selected_energy)
     savings_percentage = (estimated_saved_energy / baseline_energy) * 100
@@ -211,7 +210,7 @@ def reasoning_explanation(input_data: InputData, model: str) -> str:
 def route_input(input_data: InputData) -> OutputData:
     model = model_selection(input_data)
     model_name = MAPPING_TO_MODEL[model]
-    estimated_saved_energy, savings_percentage = energy_savings_estimation(model)
+    estimated_saved_energy, savings_percentage = energy_savings_estimation(input_data, model)
     reasoning = reasoning_explanation(input_data, model)
     
     return OutputData(complexity=complexity_assessment(input_data), 
@@ -247,24 +246,24 @@ def manage_input(prompt):
     files = [p.strip(',.?!') for p in potential_paths if os.path.exists(p.strip(',.?!'))]
 
     file_content = ""
-    resolved_file_path = None
+    resolved_path = None
 
     if files:
-        resolved_file_path = files[0]
-        file_content = Path(resolved_file_path).read_text(encoding="utf-8", errors="ignore")
+        resolved_path = files[0]
+        file_content = Path(resolved_path).read_text(encoding="utf-8", errors="ignore")
 
     input_data = InputData(
         instance_id="cli",
         repo = "local",
         base_commit="local",
         problem_statement=prompt,
-        mentioned_file_hint=resolved_file_path,
-        resolved_file_path=resolved_file_path,
+        mentioned_file_hint=resolved_path,
+        resolved_path=resolved_path,
         file_content=file_content
     )   
     output = route_input(input_data)
-    baseline_energy = MODEL_ENERGY_COST[LARGE_MODEL]
-    energy = MODEL_ENERGY_COST[output.model]
+    baseline_energy =  input_data.total_token_count * MODEL_ENERGY_COST[LARGE_MODEL]
+    energy = input_data.total_token_count * MODEL_ENERGY_COST[output.model]
 
 
     return {
@@ -273,7 +272,7 @@ def manage_input(prompt):
             "energy": energy,
             "baseline": baseline_energy,
             "savings": output.savings_percentage,
-            "tokens": output.estimated_saved_energy,
+            "tokens": input_data.total_token_count,
             "context_files": files,
             "reasoning": output.reasoning,
         }
@@ -281,7 +280,7 @@ def manage_input(prompt):
 def evaluate(n: int = 100) -> None:
     kept = 0
 
-    for row in ds:
+    for row in ds["test"]:
         if kept >= n:
             break
 
