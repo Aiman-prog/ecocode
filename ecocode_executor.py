@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-DEFAULT_MODEL = "deepseek/deepseek-chat"
+DEFAULT_MODEL = "groq/llama-3.3-70b-versatile"
 
 SYSTEM_PROMPT = (
     "You are a code transformation assistant. "

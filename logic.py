@@ -8,9 +8,6 @@ import subprocess
 import os
 
 from pathlib import Path
-from datasets import load_dataset
-
-ds = load_dataset("princeton-nlp/SWE-bench_Lite")
 
 
 SMALL_MODEL = "small"
@@ -234,6 +231,7 @@ def manage_input(prompt):
         return {
             "complexity": "Simple",
             "model": "Small",
+            "model_key": "small",
             "energy": 0.0012,
             "baseline": 0.0058,
             "savings": 79,
@@ -269,6 +267,7 @@ def manage_input(prompt):
     return {
             "complexity": output.complexity,
             "model": output.model_name,
+            "model_key": output.model,
             "energy": energy,
             "baseline": baseline_energy,
             "savings": output.savings_percentage,
@@ -278,6 +277,8 @@ def manage_input(prompt):
         }
 
 def evaluate(n: int = 100) -> None:
+    from datasets import load_dataset
+    ds = load_dataset("princeton-nlp/SWE-bench_Lite")
     kept = 0
 
     for row in ds["test"]:
