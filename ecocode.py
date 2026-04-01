@@ -42,7 +42,10 @@ def print_dashboard(prompt: str, result: dict) -> None:
     text = Text()
 
     text.append("Task: ", style="bold")
-    text.append(f"{prompt[:60]}\n")
+    if len(prompt) > 60:
+        text.append(f"{prompt[:60]}...\n")
+    else:
+        text.append(f"{prompt[:60]}\n")
 
     text.append("\nContext: ", style="bold")
     if result["context_files"]:
