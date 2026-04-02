@@ -4,6 +4,9 @@
 import asyncio
 import os
 import sys
+from rich import print
+from rich.panel import Panel
+from rich.text import Text
 
 import litellm
 from dotenv import load_dotenv
@@ -17,26 +20,61 @@ LITELLM_MODEL_MAP = {
     "large":  "groq/llama-3.3-70b-versatile",
 }
 
+def print_welcome() -> None:
+    text = Text()
+    text.append("EcoCode CLI\n", style="bold green")
+    text.append("Energy-aware routing for coding tasks\n\n")
+
+    text.append("Usage:\n", style="bold")
+    text.append("  • Ask general questions\n")
+    text.append("    ecocode> explain recursion\n\n")
+
+    text.append("  • Fix code (requires full file path)\n")
+    text.append("    ecocode> fix the bug in /full/path/to/file.py\n\n")
+
+    text.append("Type 'exit' to quit.\n", style="dim")
+    text.append("Type 'help' to display this message again.\n", style="dim")
+
+    print(Panel(text, border_style="green"))
+
 
 def print_dashboard(prompt: str, result: dict) -> None:
-    print("\n" + "=" * 40)
-    print("    ECOCODE SUSTAINABILITY DASHBOARD")
-    print("=" * 40)
-    print(f"TASK DETECTED:    {prompt[:30]}...")
-    if result["context_files"]:
-        print(f"CONTEXT AUDIT:    Found file(s): {result['context_files']}")
+    text = Text()
+
+    text.append("Task: ", style="bold")
+    if len(prompt) > 60:
+        text.append(f"{prompt[:60]}...\n")
     else:
-        print(f"CONTEXT AUDIT:    NO FILE FOUND")
-    print("-" * 40)
-    print(f"COMPLEXITY:       {result['complexity']}")
-    print(f"RECOMMENDED:      {result['model']}")
-    print(f"MODEL:            {LITELLM_MODEL_MAP[result['model_key']]}")
-    print("-" * 40)
-    print(f"EST. ENERGY:      {result['energy']:.6f}".rstrip("0").rstrip(".") + " kWh")
-    print(f"SAVINGS:          {result['savings']:.2f}%")
-    print(f"EST. TOKENS:      {result['tokens']:.0f}")
-    print(f"REASONING:        {result['reasoning']}")
-    print("=" * 40 + "\n")
+        text.append(f"{prompt[:60]}\n")
+
+    text.append("\nContext: ", style="bold")
+    if result["context_files"]:
+        text.append("File detected\n", style="green")
+    else:
+        text.append("none\n", style="red")
+
+    text.append("\nComplexity: ", style="bold")
+    complexity_color = {
+        "easy": "green",
+        "medium": "yellow",
+        "hard": "red"
+    }.get(result["complexity"].lower(), "white")
+    text.append(f"{result['complexity']}\n", style=complexity_color)
+
+    text.append("Model: ", style="bold")
+    text.append(f"{LITELLM_MODEL_MAP[result['model_key']]}\n", style="cyan")
+
+    text.append("\nEnergy: ", style="bold")
+    text.append(f"{result['energy']:.6f} kWh\n")
+
+    text.append("Savings: ", style="bold")
+    text.append(f"{result['savings']:.2f}%\n", style="green")
+
+    text.append("\nTokens: ", style="bold")
+    text.append(f"{result['tokens']:.0f}\n")
+
+    print(Panel(text, title="Eco Dashboard", border_style="blue"))
+
 
 
 async def chat(prompt: str, model: str) -> None:
@@ -50,7 +88,7 @@ async def chat(prompt: str, model: str) -> None:
 def main() -> None:
     load_dotenv()
 
-    print("EcoCode — type your prompt, or 'exit' to quit.")
+    print_welcome() 
 
     while True:
         try:
@@ -65,6 +103,10 @@ def main() -> None:
         if prompt.lower() in ("exit", "quit", "q"):
             print("Goodbye.")
             break
+
+        if prompt.lower() == "help":
+            print_welcome()
+            continue
 
         result = manage_input(prompt)
         print_dashboard(prompt, result)
