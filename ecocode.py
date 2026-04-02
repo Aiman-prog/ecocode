@@ -15,9 +15,9 @@ from logic import manage_input
 from ecocode_executor import run as executor_run
 
 LITELLM_MODEL_MAP = {
-    "small":  "groq/llama-3.1-8b-instant",
-    "medium": "groq/llama-3.3-70b-versatile",
-    "large":  "groq/llama-3.3-70b-versatile",
+    "small":  "gemini/gemini-2.5-flash",
+    "medium": "gemini/gemini-2.5-flash",
+    "large":  "gemini/gemini-2.5-flash",
 }
 
 def print_welcome() -> None:
