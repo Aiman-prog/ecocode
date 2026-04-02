@@ -16,7 +16,7 @@ LARGE_MODEL = "large"
 
 MAPPING_TO_MODEL = {
     SMALL_MODEL:  "Gemini 2.5 Flash",
-    MEDIUM_MODEL: "Groq LLaMA-3.3 70B",
+    MEDIUM_MODEL: "OpenRouter Llama 3.3 70B Instruct",
     LARGE_MODEL:  "Cerebras Qwen-3 235B",
 }
 
@@ -28,12 +28,12 @@ MAPPING_TO_MODEL = {
 #     → 0.24 Wh / 600 tokens = 4.0e-7 kWh/token
 #     Source: Google Environmental Report (2025), via ByteThirst v2.0
 #
-#   medium (Cerebras gpt-oss-120b):
-#     Best available proxy: LLaMA-3.3-70B on AWS H200 (Table 4, Jegham et al. 2025)
+#   medium (OpenRouter Llama 3.3 70B — same class as cloud-hosted 70B inference):
+#     Proxy: LLaMA-3.3-70B on AWS H200 (Table 4, Jegham et al. 2025)
 #     Short query (100 input + 300 output = 400 tokens): 0.237 ± 0.023 Wh
 #     → 0.237 Wh / 400 tokens = 5.9e-7 kWh/token
-#     Note: 120B > 70B so this is a slight underestimate; treated as conservative lower bound.
 #     Source: Jegham et al. arXiv:2505.09598 (2025), Table 4
+#     If ECOCODE_OPENROUTER_MODEL points at ~32B (e.g. Qwen2.5-32B), treat this as an upper bound.
 #
 #   large  (Cerebras qwen-3-235b):
 #     Linear interpolation between same-generation, same-architecture pure-text models

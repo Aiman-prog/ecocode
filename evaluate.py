@@ -18,6 +18,7 @@ import argparse
 import asyncio
 import difflib
 import json
+import os
 import re
 from pathlib import Path
 
@@ -35,7 +36,7 @@ from logic import (
     InputData,
 )
 
-load_dotenv()
+load_dotenv(override=True)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -44,7 +45,7 @@ load_dotenv()
 # EcoCode mode: each tier routes to a different model
 TIER_TO_MODEL = {
     "small":  "gemini/gemini-2.5-flash",
-    "medium": "groq/llama-3.3-70b-versatile",
+    "medium": "openrouter/meta-llama/llama-3.3-70b-instruct",
     "large":  "cerebras/qwen-3-235b-a22b-instruct-2507",
 }
 
@@ -60,12 +61,22 @@ SERVICE_ERROR_RETRIES = 5
 
 WORD_LIMIT = 4000
 
-TARGET_REPOS = {"pallets/flask", "sphinx-doc/sphinx", "pytest-dev/pytest"}
+TARGET_REPOS = {
+    "pallets/flask",
+    "sphinx-doc/sphinx",
+    "pytest-dev/pytest",
+    "psf/requests",
+    "mwaskom/seaborn",
+    "pylint-dev/pylint",
+}
 
 REPO_PATHS = {
-    "pallets/flask":     Path("repos/pallets_flask"),
-    "pytest-dev/pytest": Path("repos/pytest-dev_pytest"),
-    "sphinx-doc/sphinx": Path("repos/sphinx-doc_sphinx"),
+    "pallets/flask":      Path("repos/pallets_flask"),
+    "pytest-dev/pytest":  Path("repos/pytest-dev_pytest"),
+    "sphinx-doc/sphinx":  Path("repos/sphinx-doc_sphinx"),
+    "psf/requests":       Path("repos/psf_requests"),
+    "mwaskom/seaborn":    Path("repos/mwaskom_seaborn"),
+    "pylint-dev/pylint":  Path("repos/pylint-dev_pylint"),
 }
 
 RESULTS_FILE = {
@@ -90,9 +101,10 @@ _SYSTEM_PROMPT = (
 )
 
 SYSTEM_PROMPTS = {
-    "gemini":   _SYSTEM_PROMPT,
-    "cerebras": _SYSTEM_PROMPT,
-    "groq":     _SYSTEM_PROMPT,
+    "gemini":     _SYSTEM_PROMPT,
+    "cerebras":   _SYSTEM_PROMPT,
+    "groq":       _SYSTEM_PROMPT,
+    "openrouter": _SYSTEM_PROMPT,
 }
 
 # ---------------------------------------------------------------------------
@@ -181,7 +193,9 @@ def build_prompt(problem_statement: str, test_patch: str, filepath: str, file_co
 async def call_llm(model: str, prompt: str) -> tuple[str, int]:
     """Call LLM with rate-limit and service-error retry logic.
     Returns (text, total_tokens) where total_tokens comes from response.usage."""
-    if "groq/" in model:
+    if model.startswith("openrouter/"):
+        provider = "openrouter"
+    elif "groq/" in model:
         provider = "groq"
     elif "cerebras/" in model:
         provider = "cerebras"
@@ -193,9 +207,15 @@ async def call_llm(model: str, prompt: str) -> tuple[str, int]:
         {"role": "user",   "content": prompt},
     ]
 
+    extra = {}
+    if provider == "openrouter":
+        k = os.environ.get("OPENROUTER_API_KEY", "").strip()
+        if k:
+            extra["api_key"] = k
+
     for attempt in range(1, RATE_LIMIT_RETRIES + 1):
         try:
-            response = await litellm.acompletion(model=model, messages=messages)
+            response = await litellm.acompletion(model=model, messages=messages, **extra)
             text   = response.choices[0].message.content or ""
             tokens = getattr(response.usage, "total_tokens", 0) or 0
             return text, tokens
@@ -289,12 +309,17 @@ async def run_example(row: dict, mode: str) -> dict | None:
     test_patch        = row["test_patch"]
     gold_patch        = row["patch"]
 
-    # Step 1: find target file from gold patch diff header
+    # Step 1: find target file from gold patch diff header (single-file only;
+    # metrics assume one file matches the LLM full-file output).
     patch_files = re.findall(r"^diff --git a/(.*?) b/", gold_patch, re.MULTILINE)
     if not patch_files:
         print("  [skip] no target file found in patch")
         return None
-    target_file_rel = patch_files[0]
+    unique_patch_files = list(dict.fromkeys(patch_files))
+    if len(unique_patch_files) != 1:
+        print(f"  [skip] multi-file gold patch ({len(unique_patch_files)} files)")
+        return None
+    target_file_rel = unique_patch_files[0]
 
     # Step 2: checkout base_commit and read original file
     repo_path   = repo_checker(repo, base_commit)
