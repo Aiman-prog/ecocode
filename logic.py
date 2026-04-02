@@ -263,7 +263,7 @@ def manage_input(prompt):
             "reasoning": "some reasoning here",
         }
     
-    potential_paths = re.findall(r'(\/[^\n,]+?\.[a-zA-Z0-9]+)', prompt)
+    potential_paths = re.findall(r'([a-zA-Z]:\\[^\n,]+|/[^\n,]+?\.[a-zA-Z0-9]+)', prompt)
     files = [p.strip(',.?!') for p in potential_paths if os.path.exists(p.strip(',.?!'))]
 
     file_content = ""
