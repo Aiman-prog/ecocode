@@ -16,8 +16,8 @@ from ecocode_executor import run as executor_run
 
 LITELLM_MODEL_MAP = {
     "small":  "gemini/gemini-2.5-flash",
-    "medium": "gemini/gemini-2.5-flash",
-    "large":  "gemini/gemini-2.5-flash",
+    "medium": "openrouter/meta-llama/llama-3.3-70b-instruct",
+    "large":  "cerebras/qwen-3-235b-a22b-instruct-2507",
 }
 
 def print_welcome() -> None:
