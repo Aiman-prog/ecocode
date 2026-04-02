@@ -68,6 +68,8 @@ TARGET_REPOS = {
     "psf/requests",
     "mwaskom/seaborn",
     "pylint-dev/pylint",
+    "sympy/sympy",
+    "astropy/astropy",
 }
 
 REPO_PATHS = {
@@ -77,12 +79,35 @@ REPO_PATHS = {
     "psf/requests":       Path("repos/psf_requests"),
     "mwaskom/seaborn":    Path("repos/mwaskom_seaborn"),
     "pylint-dev/pylint":  Path("repos/pylint-dev_pylint"),
+    "sympy/sympy":        Path("repos/sympy_sympy"),
+    "astropy/astropy":    Path("repos/astropy_astropy"),
 }
 
 RESULTS_FILE = {
     "ecocode":  Path("results_ecocode.json"),
     "baseline": Path("results_baseline.json"),
 }
+
+
+def _load_results_list(path: Path) -> list:
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _upsert_result(accum: list, result: dict) -> None:
+    """Replace row with same instance_id or append (merge across runs)."""
+    iid = result["instance_id"]
+    for i, row in enumerate(accum):
+        if isinstance(row, dict) and row.get("instance_id") == iid:
+            accum[i] = result
+            return
+    accum.append(result)
+
 
 _SYSTEM_PROMPT = (
     "You are a surgical code repair assistant. "
@@ -417,25 +442,29 @@ async def run_evaluation(mode: str, n: int | None, instance: str | None) -> None
             print(f"Instance '{instance}' not found.")
             return
     results_path = RESULTS_FILE[mode]
-    results      = []
-    limit        = n  # stop after this many *processed* (non-skipped) examples
+    merged       = _load_results_list(results_path)
+    session      = []
+    limit        = n  # stop after this many *processed* (non-skipped) examples this run
 
     for idx, row in enumerate(examples, 1):
-        if limit and len(results) >= limit:
+        if limit and len(session) >= limit:
             break
-        print(f"[{idx}] {row['instance_id']}  (processed {len(results)}/{limit or '∞'})")
+        print(f"[{idx}] {row['instance_id']}  (processed {len(session)}/{limit or '∞'})")
         result = await run_example(row, mode)
 
         if result is None:
             print("  → skipped\n")
             continue
 
-        results.append(result)
+        _upsert_result(merged, result)
+        session.append(result)
+        results_path.write_text(json.dumps(merged, indent=2))
         print(
             f"  → model={result['model_key']}  "
             f"bleu={result['bleu']:.1f}  f1={result['f1']:.3f}  "
             f"exact={result['exact_match']}  "
-            f"energy={result['energy']:.6f} kWh\n"
+            f"energy={result['energy']:.6f} kWh"
+            f"\n  → appended to {results_path} ({len(merged)} total rows)\n"
         )
 
     try:
@@ -445,16 +474,16 @@ async def run_evaluation(mode: str, n: int | None, instance: str | None) -> None
     except Exception:
         pass
 
-    results_path.write_text(json.dumps(results, indent=2))
-    print(f"Results saved to {results_path}")
+    if session:
+        print(f"Results file: {results_path} ({len(merged)} rows)")
 
-    n_ran        = len(results)
-    n_exact      = sum(1 for r in results if r["exact_match"])
-    avg_bleu     = sum(r["bleu"] for r in results) / n_ran if n_ran else 0
-    avg_f1       = sum(r["f1"]   for r in results) / n_ran if n_ran else 0
-    total_energy = sum(r["energy"] for r in results)
+    n_ran        = len(session)
+    n_exact      = sum(1 for r in session if r["exact_match"])
+    avg_bleu     = sum(r["bleu"] for r in session) / n_ran if n_ran else 0
+    avg_f1       = sum(r["f1"]   for r in session) / n_ran if n_ran else 0
+    total_energy = sum(r["energy"] for r in session)
 
-    print(f"\nSUMMARY ({mode})")
+    print(f"\nSUMMARY ({mode}) — this run only")
     if n_ran:
         print(f"  Examples:     {n_ran}")
         print(f"  Avg BLEU:     {avg_bleu:.1f}")
@@ -462,7 +491,7 @@ async def run_evaluation(mode: str, n: int | None, instance: str | None) -> None
         print(f"  Exact Match:  {n_exact}/{n_ran}  ({100*n_exact/n_ran:.1f}%)")
         print(f"  Total energy: {total_energy:.6f} kWh")
     else:
-        print("  No results.")
+        print("  No new results this run.")
 
 
 # ---------------------------------------------------------------------------
