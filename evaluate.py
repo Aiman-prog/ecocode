@@ -70,17 +70,25 @@ TARGET_REPOS = {
     "pylint-dev/pylint",
     "sympy/sympy",
     "astropy/astropy",
+    "django/django",
+    "matplotlib/matplotlib",
+    "scikit-learn/scikit-learn",
+    "pydata/xarray",
 }
 
 REPO_PATHS = {
-    "pallets/flask":      Path("repos/pallets_flask"),
-    "pytest-dev/pytest":  Path("repos/pytest-dev_pytest"),
-    "sphinx-doc/sphinx":  Path("repos/sphinx-doc_sphinx"),
-    "psf/requests":       Path("repos/psf_requests"),
-    "mwaskom/seaborn":    Path("repos/mwaskom_seaborn"),
-    "pylint-dev/pylint":  Path("repos/pylint-dev_pylint"),
-    "sympy/sympy":        Path("repos/sympy_sympy"),
-    "astropy/astropy":    Path("repos/astropy_astropy"),
+    "pallets/flask":           Path("repos/pallets_flask"),
+    "pytest-dev/pytest":       Path("repos/pytest-dev_pytest"),
+    "sphinx-doc/sphinx":       Path("repos/sphinx-doc_sphinx"),
+    "psf/requests":            Path("repos/psf_requests"),
+    "mwaskom/seaborn":         Path("repos/mwaskom_seaborn"),
+    "pylint-dev/pylint":       Path("repos/pylint-dev_pylint"),
+    "sympy/sympy":             Path("repos/sympy_sympy"),
+    "astropy/astropy":         Path("repos/astropy_astropy"),
+    "django/django":           Path("repos/django_django"),
+    "matplotlib/matplotlib":   Path("repos/matplotlib_matplotlib"),
+    "scikit-learn/scikit-learn": Path("repos/scikit-learn_scikit-learn"),
+    "pydata/xarray":           Path("repos/pydata_xarray"),
 }
 
 RESULTS_FILE = {
