@@ -20,6 +20,8 @@ SYSTEM_PROMPT = (
     "Return ONLY the complete, updated source code. "
     "Do NOT wrap it in markdown code fences (no backticks). "
     "Do NOT include any commentary, explanation, or prose. "
+    "Do NOT add any inline comments to the code. "
+    "Preserve the original code style exactly — only change what is necessary to fix the bug. "
     "Your entire response must be raw source code only."
 )
 

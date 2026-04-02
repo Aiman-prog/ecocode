@@ -15,19 +15,42 @@ MEDIUM_MODEL = "medium"
 LARGE_MODEL = "large"
 
 MAPPING_TO_MODEL = {
-    SMALL_MODEL: "LLaMA-3 8B / Gemini Flash Lite",
-    MEDIUM_MODEL: "LLaMA-3 70B / DeepSeek Chat",
-    LARGE_MODEL: "GPT-4o / Claude Opus",
+    SMALL_MODEL:  "Gemini 2.5 Flash",
+    MEDIUM_MODEL: "Groq LLaMA-3.3 70B",
+    LARGE_MODEL:  "Cerebras Qwen-3 235B",
 }
 
+# Energy cost in kWh per token, derived from published per-query measurements.
+# All Wh/query figures divided by total tokens in that query configuration.
+#
+#   small  (Gemini Flash):
+#     Google official: 0.24 Wh per median text prompt (~600 tokens)
+#     → 0.24 Wh / 600 tokens = 4.0e-7 kWh/token
+#     Source: Google Environmental Report (2025), via ByteThirst v2.0
+#
+#   medium (Cerebras gpt-oss-120b):
+#     Best available proxy: LLaMA-3.3-70B on AWS H200 (Table 4, Jegham et al. 2025)
+#     Short query (100 input + 300 output = 400 tokens): 0.237 ± 0.023 Wh
+#     → 0.237 Wh / 400 tokens = 5.9e-7 kWh/token
+#     Note: 120B > 70B so this is a slight underestimate; treated as conservative lower bound.
+#     Source: Jegham et al. arXiv:2505.09598 (2025), Table 4
+#
+#   large  (Cerebras qwen-3-235b):
+#     Linear interpolation between same-generation, same-architecture pure-text models
+#     from Table 4, Jegham et al. (2025), both hosted on AWS H200/H100:
+#       LLaMA-3.1-70B:  1.271 Wh / 400 tok = 3.18e-6 kWh/token
+#       LLaMA-3.1-405B: 2.226 Wh / 400 tok = 5.57e-6 kWh/token
+#     235B is (235-70)/(405-70) = 49.3% of the way from 70B to 405B
+#     → 1.271 + 0.493 × (2.226 - 1.271) = 1.742 Wh / 400 tok = 4.35e-6 kWh/token
+#     Source: Jegham et al. arXiv:2505.09598 (2025), Table 4
 MODEL_ENERGY_COST = {
-    SMALL_MODEL: 0.000015,
-    MEDIUM_MODEL: 0.00011,
-    LARGE_MODEL: 0.00090,
+    SMALL_MODEL:  4.0e-7,
+    MEDIUM_MODEL: 5.9e-7,
+    LARGE_MODEL:  4.35e-6,
 }
 
 THRESHOLDS = {
-    "easy": 200.0,
+    "easy": 400.0,
     "medium": 800.0,
 }
 
